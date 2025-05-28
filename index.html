@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>JSON Excel-Like Editor</title>
+  <script src="https://cdn.jsdelivr.net/npm/ @tailwindcss/browser@4.1.7/dist/index.global.min.js"></script>
+  <style>
+    /* Theme System */
+    [data-theme="light"] {
+      --bg-primary: #f7fafc;
+      --bg-secondary: #ffffff;
+      --text-primary: #2d3748;
+      --border-color: #e2e8f0;
+      --hover-bg: #edf2f7;
+    }
+    [data-theme="dark"] {
+      --bg-primary: #1a202c;
+      --bg-secondary: #2d3748;
+      --text-primary: #cbd5e0;
+      --border-color: #4a5568;
+      --hover-bg: #4a5568;
+    }
+
+    /* Component Styles */
+    .theme-bg { background-color: var(--bg-secondary); }
+    .theme-border { border-color: var(--border-color); }
+    .theme-input {
+      background-color: var(--bg-secondary);
+      color: var(--text-primary);
+      border-color: var(--border-color);
+    }
+    
+    /* Interactive Elements */
+    .controls-button:hover { opacity: 0.9; }
+    table, th, td { border: 1px solid var(--border-color); }
+    
+    /* Modal Styles */
+    .modal-content {
+      background-color: var(--bg-secondary);
+      border-color: var(--border-color);
+    }
+    
+    /* Context Menu */
+    .context-menu {
+      background-color: var(--bg-secondary);
+      border-color: var(--border-color);
+    }
+    .menu-item:hover { background-color: var(--hover-bg); }
+  </style>
+</head>
+<body class="p-4 font-sans h-screen overflow-hidden">
+  <div class="flex flex-col h-full" id="app-container">
+    <!-- Controls -->
+    <div class="flex flex-wrap gap-2 mb-4 p-2 rounded controls-container theme-bg theme-border">
+      <button data-action="toggleTheme" class="bg-gray-800 text-white px-2 py-1 rounded text-xs controls-button">Theme</button>
+      <button data-action="showSchema" class="bg-blue-500 text-white px-2 py-1 rounded text-xs controls-button">Schema</button>
+      <button data-action="showGoTo" class="bg-purple-500 text-white px-2 py-1 rounded text-xs controls-button">GoTo</button>
+      <input id="globalSearch" placeholder="🔍" class="px-2 py-1 border rounded text-xs w-24 theme-input" />
+      <button data-action="createNew" class="bg-green-600 text-white px-2 py-1 rounded text-xs controls-button">New</button>
+      <button data-action="addColumn" class="bg-yellow-600 text-white px-2 py-1 rounded text-xs controls-button">+Col</button>
+      <button data-action="addRow" class="bg-indigo-600 text-white px-2 py-1 rounded text-xs controls-button">+Row</button>
+      <button data-action="deleteRow" class="bg-red-600 text-white px-2 py-1 rounded text-xs controls-button">DelRow</button>
+      <button data-action="deleteSelected" class="bg-red-800 text-white px-2 py-1 rounded text-xs controls-button">DelSel</button>
+      <button data-action="export" class="bg-blue-600 text-white px-2 py-1 rounded text-xs controls-button">Export</button>
+      <label class="bg-gray-300 text-gray-800 px-2 py-1 rounded cursor-pointer text-xs controls-button">
+        Import <input type="file" id="fileInput" class="hidden" accept="application/json" />
+      </label>
+      <button data-action="render" class="bg-blue-800 text-white px-2 py-1 rounded text-xs controls-button">Render</button>
+    </div>
+
+    <!-- Main Content -->
+    <div class="flex flex-1 overflow-hidden">
+      <!-- JSON Input -->
+      <textarea id="jsonInput"
+        class="w-1/3 p-2 mr-4 h-full resize-none font-mono text-sm theme-input"
+        placeholder='Paste JSON array here'></textarea>
+      
+      <!-- Table Container -->
+      <div id="tableContainer" class="flex-1 overflow-auto theme-bg rounded p-2 theme-border"></div>
+    </div>
+
+    <!-- Modals -->
+    <div id="schemaModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center">
+      <div class="modal-content p-4 rounded shadow-lg max-w-md w-full m-4">
+        <h2 class="text-lg font-bold mb-2">Define Schema</h2>
+        <div id="schemaFields" class="space-y-2 max-h-60 overflow-y-auto"></div>
+        <div class="flex justify-between mt-4">
+          <button data-action="addSchemaField" class="bg-green-500 text-white px-2 py-1 rounded text-xs controls-button">+ Field</button>
+          <button data-action="applySchema" class="bg-blue-600 text-white px-3 py-1 rounded text-xs controls-button">Apply</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="goToModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center">
+      <div class="modal-content p-4 rounded shadow-lg max-w-xs w-full">
+        <h2 class="text-lg font-bold mb-2">Go To Cell</h2>
+        <input id="goToInput" placeholder="E.g., A1" class="w-full px-2 py-1 border rounded mb-2 text-xs theme-input" />
+        <button data-action="goToCell" class="bg-blue-600 text-white px-3 py-1 rounded text-xs w-full controls-button">Go</button>
+      </div>
+    </div>
+
+    <!-- Context Menu -->
+    <div id="contextMenu" class="context-menu hidden rounded border shadow-lg overflow-hidden">
+      <ul class="list-none m-0 p-0">
+        <li><button data-action="addRowHere" class="menu-item px-4 py-2 hover:bg-gray-700 w-full text-left">Add Row Here</button></li>
+        <li><button data-action="deleteRowHere" class="menu-item px-4 py-2 hover:bg-gray-700 w-full text-left">Delete This Row</button></li>
+        <li><button data-action="addColumnHere" class="menu-item px-4 py-2 hover:bg-gray-700 w-full text-left">Add Column Here</button></li>
+        <li><button data-action="deleteColumnHere" class="menu-item px-4 py-2 hover:bg-gray-700 w-full text-left">Delete This Column</button></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Application Script -->
+  <script>
+    // Theme Management
+    class ThemeManager {
+      static init() {
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.setAttribute('data-theme', prefersDark ? 'dark' : 'light');
+      }
+
+      static toggleTheme() {
+        const current = document.documentElement.getAttribute('data-theme');
+        document.documentElement.setAttribute('data-theme', current === 'light' ? 'dark' : 'light');
+      }
+    }
+
+    // Modal Manager
+    class ModalManager {
+      constructor(modalElement) {
+        this.modal = modalElement;
+      }
+
+      show() {
+        this.modal.classList.add('flex');
+        this.modal.classList.remove('hidden');
+      }
+
+      hide() {
+        this.modal.classList.add('hidden');
+        this.modal.classList.remove('flex');
+      }
+    }
+
+    // Schema Validator
+    class SchemaValidator {
+      static validate(value, type) {
+        if (type === 'number') return !isNaN(value);
+        if (type === 'boolean') return ['true','false'].includes(value.toLowerCase());
+        if (type === 'date') return !isNaN(Date.parse(value));
+        return true;
+      }
+    }
+
+    // Context Menu
+    class ContextMenu {
+      constructor(menuElement) {
+        this.menu = menuElement;
+      }
+
+      show(x, y) {
+        this.menu.style.left = `${x}px`;
+        this.menu.style.top = `${y}px`;
+        this.menu.classList.remove('hidden');
+      }
+
+      hide() {
+        this.menu.classList.add('hidden');
+      }
+    }
+
+    // Main Application
+    class JSONEditor {
+      constructor() {
+        this.state = {
+          data: [],
+          schema: {},
+          filters: {},
+          sortCol: null,
+          sortDir: 1,
+          columnKeys: [],
+          colMap: {},
+          context: { row: -1, col: -1 }
+        };
+        
+        this.elements = this._mapElements();
+        this.schemaModal = new ModalManager(this.elements.schemaModal);
+        this.goToModal = new ModalManager(this.elements.goToModal);
+        this.contextMenu = new ContextMenu(this.elements.contextMenu);
+        
+        this._initEventListeners();
+        this._init();
+      }
+
+      _mapElements() {
+        return {
+          container: document.getElementById('app-container'),
+          jsonInput: document.getElementById('jsonInput'),
+          tableContainer: document.getElementById('tableContainer'),
+          globalSearch: document.getElementById('globalSearch'),
+          fileInput: document.getElementById('fileInput'),
+          schemaModal: document.getElementById('schemaModal'),
+          schemaFields: document.getElementById('schemaFields'),
+          goToModal: document.getElementById('goToModal'),
+          goToInput: document.getElementById('goToInput'),
+          contextMenu: document.getElementById('contextMenu')
+        };
+      }
+
+      _initEventListeners() {
+        document.body.addEventListener('click', this._handleControlAction.bind(this));
+        this.elements.fileInput.addEventListener('change', this._handleImport.bind(this));
+        this.elements.globalSearch.addEventListener('input', this._handleSearch.bind(this));
+        window.addEventListener('click', () => this.contextMenu.hide());
+        this.elements.jsonInput.addEventListener('input', this._updateData.bind(this));
+        
+        // Context menu events
+        document.addEventListener('contextmenu', (e) => {
+          if (e.target.closest('td, th')) {
+            e.preventDefault();
+            this._showContextMenu(e.pageX, e.pageY);
+          }
+        });
+      }
+
+      _init() {
+        this._createNewDB();
+        this._renderTable();
+      }
+
+      // Core Data Operations
+      _updateData() {
+        try {
+          const parsed = JSON.parse(this.elements.jsonInput.value);
+          if (Array.isArray(parsed)) {
+            this.state.data = parsed;
+            this._renderTable();
+          }
+        } catch (e) {
+          console.error('Invalid JSON:', e);
+        }
+      }
+
+      _saveData() {
+        this.elements.jsonInput.value = JSON.stringify(this.state.data, null, 2);
+      }
+
+      _createNewDB() {
+        this.state.data = [{}];
+        this.state.filters = {};
+        this.state.sortCol = null;
+        this._saveData();
+      }
+
+      _handleImport(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          try {
+            const parsed = JSON.parse(evt.target.result);
+            if (!Array.isArray(parsed)) throw new Error('Invalid format');
+            this.state.data = parsed;
+            this.state.filters = {};
+            this.state.sortCol = null;
+            this._saveData();
+            this._renderTable();
+          } catch (err) {
+            alert('Invalid JSON file');
+          }
+        };
+        reader.readAsText(file);
+        event.target.value = '';
+      }
+
+      _exportJSON() {
+        this._saveData();
+        const blob = new Blob([this.elements.jsonInput.value], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'data.json';
+        a.click();
+      }
+
+      // Table Rendering
+      _renderTable() {
+        try {
+          this.state.data = JSON.parse(this.elements.jsonInput.value) || [];
+        } catch {
+          this.state.data = [];
+        }
+        
+        this._evaluateFormulas();
+        this._saveData();
+        
+        const display = [...this.state.data];
+        this._sortData(display);
+        
+        const keys = Array.from(new Set(this.state.data.flatMap(r => Object.keys(r))));
+        this._createColMap(keys);
+        
+        const table = this._buildTable(display, keys);
+        this.elements.tableContainer.innerHTML = '';
+        this.elements.tableContainer.appendChild(table);
+      }
+
+      _sortData(display) {
+        if (this.state.sortCol) {
+          display.sort((a, b) => {
+            const valA = a[this.state.sortCol] || '';
+            const valB = b[this.state.sortCol] || '';
+            
+            if (typeof valA === 'number' && typeof valB === 'number') {
+              return (valA - valB) * this.state.sortDir;
+            }
+            
+            return (valA.toString().toUpperCase() > valB.toString().toUpperCase() ? 
+                   this.state.sortDir : -this.state.sortDir);
+          });
+        }
+      }
+
+      _createColMap(keys) {
+        this.state.columnKeys = keys;
+        this.state.colMap = {};
+        
+        keys.forEach((k, i) => {
+          this.state.colMap[String.fromCharCode(65 + i)] = k;
+        });
+      }
+
+      _buildTable(display, keys) {
+        const table = document.createElement('table');
+        table.className = 'min-w-full table-auto border-collapse text-sm';
+        table.appendChild(this._buildHeader(keys));
+        
+        const tbody = document.createElement('tbody');
+        display.forEach((row, ridx) => {
+          tbody.appendChild(this._buildRow(row, ridx, keys));
+        });
+        
+        table.appendChild(tbody);
+        return table;
+      }
+
+      // Table Components
+      _buildHeader(keys) {
+        const thead = document.createElement('thead');
+        thead.className = 'bg-gray-200 dark:bg-gray-700';
+        
+        const tr = document.createElement('tr');
+        
+        const th0 = document.createElement('th');
+        th0.className = 'border px-4 py-2';
+        th0.textContent = '✓';
+        tr.appendChild(th0);
+        
+        keys.forEach(k => {
+          const th = document.createElement('th');
+          th.className = 'border px-4 py-2 resizable theme-border';
+          th.textContent = k;
+          th.onclick = () => this._sortBy(k);
+          
+          const fin = document.createElement('input');
+          fin.type = 'text';
+          fin.placeholder = 'Filter';
+          fin.value = this.state.filters[k] || '';
+          fin.className = 'w-full mt-1 text-xs border rounded theme-input';
+          
+          fin.addEventListener('input', (e) => {
+            this.state.filters[k] = e.target.value;
+            this._renderTable();
+          });
+          
+          const resizer = document.createElement('span');
+          resizer.className = 'resizer';
+          resizer.addEventListener('mousedown', this._initResize.bind(this));
+          
+          th.appendChild(fin);
+          th.appendChild(resizer);
+          tr.appendChild(th);
+        });
+        
+        thead.appendChild(tr);
+        return thead;
+      }
+
+      _buildRow(row, ridx, keys) {
+        const tr = document.createElement('tr');
+        
+        const td0 = document.createElement('td');
+        td0.className = 'border px-4 py-2';
+        
+        const chk = document.createElement('input');
+        chk.type = 'checkbox';
+        chk.id = `chk_${ridx}`;
+        td0.appendChild(chk);
+        tr.appendChild(td0);
+        
+        keys.forEach((k, cidx) => {
+          const td = document.createElement('td');
+          td.className = 'border px-4 py-2';
+          
+          const inp = document.createElement('input');
+          inp.type = 'text';
+          inp.value = row[k] || '';
+          inp.className = 'w-full px-1 py-1 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 theme-input';
+          
+          if (this.state.schema[k] && !SchemaValidator.validate(inp.value, this.state.schema[k])) {
+            inp.classList.add('invalid');
+          }
+          
+          inp.addEventListener('input', (e) => {
+            row[k] = e.target.value;
+            this._saveData();
+          });
+          
+          td.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            this.state.context.row = ridx;
+            this.state.context.col = cidx;
+            this._showContextMenu(e.pageX, e.pageY);
+          });
+          
+          td.appendChild(inp);
+          tr.appendChild(td);
+        });
+        
+        return tr;
+      }
+
+      // Event Handlers
+      _handleControlAction(e) {
+        const target = e.target.closest('[data-action]');
+        if (!target) return;
+        
+        const action = target.dataset.action;
+        
+        switch(action) {
+          case 'toggleTheme': ThemeManager.toggleTheme(); break;
+          case 'showSchema': this.schemaModal.show(); break;
+          case 'addSchemaField': this._addSchemaField(); break;
+          case 'applySchema': this._applySchema(); break;
+          case 'showGoTo': this.goToModal.show(); break;
+          case 'goToCell': this._goToCell(); break;
+          case 'createNew': this._createNewDB(); break;
+          case 'addColumn': this._addColumn(); break;
+          case 'addRow': this._addRow(); break;
+          case 'deleteRow': this._deleteRow(); break;
+          case 'deleteSelected': this._deleteSelected(); break;
+          case 'export': this._exportJSON(); break;
+          case 'render': this._renderTable(); break;
+          case 'addRowHere': this._ctxAddRow(); break;
+          case 'deleteRowHere': this._ctxDeleteRow(); break;
+          case 'addColumnHere': this._ctxAddColumn(); break;
+          case 'deleteColumnHere': this._ctxDeleteColumn(); break;
+        }
+      }
+
+      // Schema Management
+      _addSchemaField() {
+        const div = document.createElement('div');
+        div.className = 'flex gap-2';
+        div.innerHTML = `
+          <input placeholder="Column" class="px-1 py-1 border rounded flex-1 theme-input" />
+          <select class="px-1 py-1 border rounded theme-input">
+            <option value="string">String</option>
+            <option value="number">Number</option>
+            <option value="boolean">Boolean</option>
+            <option value="date">Date</option>
+            <option value="enum">Enum</option>
+          </select>
+        `;
+        this.elements.schemaFields.appendChild(div);
+      }
+
+      _applySchema() {
+        this.state.schema = {};
+        document.querySelectorAll('#schemaFields > div').forEach(div => {
+          const key = div.children[0].value.trim();
+          const type = div.children[1].value;
+          if (key) this.state.schema[key] = type;
+        });
+        this.schemaModal.hide();
+        this._renderTable();
+      }
+
+      // Table Operations
+      _sortBy(col) {
+        if (this.state.sortCol === col) {
+          this.state.sortDir *= -1;
+        } else {
+          this.state.sortCol = col;
+          this.state.sortDir = 1;
+        }
+        this._renderTable();
+      }
+
+      _addColumn() {
+        const col = prompt('New column name:');
+        if (col) {
+          this.state.data.forEach(r => { if (!(col in r)) r[col] = ''; });
+          this._saveData();
+          this._renderTable();
+        }
+      }
+
+      _addRow() {
+        const newRow = {};
+        this.state.columnKeys.forEach(k => newRow[k] = '');
+        this.state.data.push(newRow);
+        this._saveData();
+        this._renderTable();
+      }
+
+      _deleteRow() {
+        if (this.state.data.length > 1) {
+          this.state.data.pop();
+          this._saveData();
+          this._renderTable();
+        }
+      }
+
+      _deleteSelected() {
+        this.state.data = this.state.data.filter((_, i) => 
+          !document.getElementById(`chk_${i}`)?.checked
+        );
+        this._saveData();
+        this._renderTable();
+      }
+
+      // Context Menu Actions
+      _showContextMenu(x, y) {
+        this.contextMenu.show(x, y);
+      }
+
+      _ctxAddRow() {
+        if (this.state.context.row >= 0) {
+          this.state.data.splice(this.state.context.row + 1, 0, {...this.state.data[this.state.context.row]});
+          this._saveData();
+          this._renderTable();
+          this.contextMenu.hide();
+        }
+      }
+
+      _ctxDeleteRow() {
+        if (this.state.context.row >= 0) {
+          this.state.data.splice(this.state.context.row, 1);
+          this._saveData();
+          this._renderTable();
+          this.contextMenu.hide();
+        }
+      }
+
+      _ctxAddColumn() {
+        this._addColumn();
+        this.contextMenu.hide();
+      }
+
+      _ctxDeleteColumn() {
+        if (this.state.context.col >= 0) {
+          const key = this.state.columnKeys[this.state.context.col];
+          this.state.data.forEach(r => delete r[key]);
+          this._saveData();
+          this._renderTable();
+          this.contextMenu.hide();
+        }
+      }
+
+      // Utility Functions
+      _evaluateFormulas() {
+        this.state.data.forEach((row, rIdx) => {
+          this.state.columnKeys.forEach(key => {
+            const val = row[key];
+            if (typeof val === 'string' && val.startsWith('=')) {
+              try {
+                const expr = val.substring(1).replace(/([A-Z]+)(\d+)/g, (m, c, rowNum) => {
+                  const colKey = this.state.colMap[c];
+                  return `data[${rowNum-1}]["${colKey}"]`;
+                });
+                row[key] = eval(expr); // eslint-disable-line no-eval
+              } catch (e) {
+                console.error('Formula error:', e);
+              }
+            }
+          });
+        });
+      }
+
+      _handleSearch(e) {
+        const q = e.target.value.toLowerCase();
+        if (!q) return;
+        document.querySelectorAll('#tableContainer input[type=text]').forEach(cell => {
+          cell.classList.toggle('bg-yellow-200', cell.value.toLowerCase().includes(q));
+        });
+      }
+
+      _goToCell() {
+        const val = this.elements.goToInput.value.toUpperCase();
+        const m = val.match(/([A-Z]+)(\d+)/);
+        if (!m) return;
+        
+        const [, col, row] = m;
+        const cIdx = this.state.columnKeys.indexOf(this.state.colMap[col]);
+        const rIdx = parseInt(row, 10) - 1;
+        
+        const rows = document.querySelectorAll('#tableContainer tbody tr');
+        if (rows[rIdx]) {
+          const inputs = rows[rIdx].querySelectorAll('input[type=text]');
+          inputs[cIdx]?.focus();
+        }
+        
+        this.goToModal.hide();
+      }
+
+      _initResize(e) {
+        const curCol = e.target.parentElement;
+        const startX = e.clientX;
+        const startW = curCol.offsetWidth;
+        
+        const onMouseMove = (moveEvt) => {
+          const w = startW + (moveEvt.clientX - startX);
+          if (w > 50) curCol.style.width = w + 'px';
+        };
+        
+        const onMouseUp = () => {
+          document.removeEventListener('mousemove', onMouseMove);
+          document.removeEventListener('mouseup', onMouseUp);
+        };
+        
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+      }
+    }
+
+    // Initialize Application
+    document.addEventListener('DOMContentLoaded', () => {
+      ThemeManager.init();
+      new JSONEditor();
+    });
+  </script>
+</body>
+</html>
